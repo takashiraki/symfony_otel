@@ -4,3 +4,6 @@
 [submodule "symfony"]
 	path = symfony
 	url = https://github.com/takashiraki/docker_laravel.git
+[submodule "docker_proxy_network"]
+	path = docker_proxy_network
+	url = https://github.com/takashiraki/docker_proxy_network.git
