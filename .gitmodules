@@ -1,0 +1,3 @@
+[submodule "docker_otel"]
+	path = docker_otel
+	url = https://github.com/takashiraki/docker_prometheus.git
