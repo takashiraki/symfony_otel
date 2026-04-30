@@ -25,7 +25,7 @@ init:
 		"TEMPO_VIRTUAL_PORT=3200"; do \
 		key=$$(echo $$pair | cut -d= -f1); \
 		value=$$(echo $$pair | cut -d= -f2-); \
-		sed -i '' "s|^$$key=$$|$$key=$$value|" docker_otel/.env; \
+		sed -i '' "s|^$$key=.*|$$key=$$value|" docker_otel/.env; \
 	done
 	@echo "$(GREEN)Environment variables set up in docker_otel/.env$(RESET)"
 	@sed -i '' "s|http://my-tempo:|http://symfony-otel-tempo:|g" docker_otel/grafana/provisioning/datasources/tempo.yaml && echo "$(GREEN)Updated tempo datasource URL$(RESET)"
@@ -37,6 +37,8 @@ init:
 	else \
 		echo "$(GREEN)symfony/src/my_symfony already exists, skipping$(RESET)"; \
 	fi
+	@sed -i '' "s|^OTEL_EXPORTER_OTLP_ENDPOINT=.*|OTEL_EXPORTER_OTLP_ENDPOINT=http://symfony-otel-tempo:4318|" symfony/src/my_symfony/.env.dev && echo "$(GREEN)Updated OTEL_EXPORTER_OTLP_ENDPOINT in .env.dev$(RESET)"
+	@sed -i '' "s|SetEnv OTEL_EXPORTER_OTLP_ENDPOINT .*|SetEnv OTEL_EXPORTER_OTLP_ENDPOINT http://symfony-otel-tempo:4318|" symfony/src/my_symfony/.docker/infra/000-default.conf && echo "$(GREEN)Updated OTEL_EXPORTER_OTLP_ENDPOINT in 000-default.conf$(RESET)"
 
 	@cp -n symfony/.env.example symfony/.env && echo "$(GREEN)Created symfony/.env$(RESET)" || echo "$(GREEN)symfony/.env already exists, skipping$(RESET)"
 	@for pair in \
@@ -45,10 +47,11 @@ init:
 		"DOCKER_PATH=src/my_symfony" \
 		"VIRTUAL_HOST=symfony-otel.localhost" \
 		"TZ=locale" \
+		"OTEL_EXPORTER_OTLP_ENDPOINT=http://symfony-otel-tempo:4318" \
 		"OTEL_SERVICE_NAME=symfony_otel"; do \
 		key=$$(echo $$pair | cut -d= -f1); \
 		value=$$(echo $$pair | cut -d= -f2-); \
-		sed -i '' "s|^$$key=$$|$$key=$$value|" symfony/.env; \
+		sed -i '' "s|^$$key=.*|$$key=$$value|" symfony/.env; \
 	done
 	@echo "$(GREEN)Environment variables set up in symfony/.env$(RESET)"
 
@@ -74,11 +77,13 @@ up:
 	@docker compose -f symfony/docker-compose.yml up -d
 	@echo "$(GREEN)Symfony application container is starting...$(RESET)"
 
-	@cp -n symfony/src/my_symfony/.env.dev symfony/src/my_symfony/.env.dev.local && echo "$(GREEN)Created .env.dev.local$(RESET)" || echo "$(GREEN).env.dev.local already exists, skipping$(RESET)"
-	@sed -i '' "s|OTEL_EXPORTER_OTLP_ENDPOINT=http://my-tempo:4318|OTEL_EXPORTER_OTLP_ENDPOINT=http://symfony-otel-tempo:4318|" symfony/src/my_symfony/.env.dev.local && echo "$(GREEN)Updated OTEL_EXPORTER_OTLP_ENDPOINT$(RESET)"
-
 	@echo "Running composer install..."
 	@docker exec symfony_otel composer install && echo "$(GREEN)composer install done$(RESET)"
+
+migrate:
+	@echo "Migrating database..."
+	@docker exec symfony_otel php bin/console doctrine:migrations:migrate --no-interaction && echo "$(GREEN)Database migrated successfully$(RESET)"
+
 check-deps:
 	@echo "Checking dependencies..."
 	@command -v docker > /dev/null 2>&1 || (echo "$(RED)Error: docker is not installed$(RESET)" && exit 1)
@@ -89,3 +94,22 @@ build-tailwind:
 	@echo "Building Tailwind CSS assets..."
 	@docker exec symfony_otel php bin/console tailwind:build
 	@echo "$(GREEN)Tailwind CSS assets built successfully$(RESET)"
+
+quick-setup: check-deps init up build-tailwind migrate
+	@printf "\n$(BOLD)$(GREEN)╔════════════════════════════════════════╗$(RESET)\n"
+	@printf "$(BOLD)$(GREEN)║   Quick setup complete!                ║$(RESET)\n"
+	@printf "$(BOLD)$(GREEN)╚════════════════════════════════════════╝$(RESET)\n\n"
+	@printf "  $(BLUE)Your Symfony OTEL application is up and running!$(RESET)\n\n"
+
+down:
+	@echo "Stopping Symfony OTEL application..."
+	@docker compose -f docker_otel/docker-compose.yml down
+	@echo "$(GREEN)Symfony OTEL application stopped$(RESET)"
+
+	@echo "Stopping proxy container..."
+	@docker compose -f docker_proxy_network/docker-compose.yml down
+	@echo "$(GREEN)Proxy container stopped$(RESET)"
+
+	@echo "Stopping Symfony application container..."
+	@docker compose -f symfony/docker-compose.yml down
+	@echo "$(GREEN)Symfony application container stopped$(RESET)"
